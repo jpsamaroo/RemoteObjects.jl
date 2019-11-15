@@ -1,0 +1,18 @@
+name = "RemoteObjects"
+uuid = "728c260d-331a-4ef5-b0ec-b7709f31c11e"
+authors = ["Julian P Samaroo <jpsamaroo@jpsamaroo.me>"]
+version = "0.1.0"
+
+[deps]
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
