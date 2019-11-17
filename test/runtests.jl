@@ -18,6 +18,10 @@ x = mycall(r)
 @test x isa RemoteObject{Int}
 @test r.uuid != x.uuid
 @test Base.fetch(x) == 1
+iob = IOBuffer()
+Base.show(iob, r)
+str = String(take!(iob))
+@test str == "RemoteObject (worker 2): MyStruct(1)"
 
 r = @remote MyStruct(2)
 @test r isa RemoteObject{MyStruct}
