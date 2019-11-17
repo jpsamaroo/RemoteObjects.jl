@@ -17,7 +17,9 @@ function RemoteObject(::Type{T}, #=id::Int,=# x...; kwargs...) where T
     uuid = remotecall_fetch(init_object, id, T, x...; kwargs...)
     robj = RemoteObject{T}(uuid, id)
     finalizer(robj) do _
-        remotecall_fetch(finalize_object, id, uuid)
+        if id in workers()
+            remotecall_fetch(finalize_object, id, uuid)
+        end
     end
     return robj
 end
@@ -55,6 +57,8 @@ end
 _unwrap(robj::RemoteObject) = _unwrap(robj.uuid)
 _unwrap(uuid::UUID) = LOCALS[uuid]
 
+### Mimicry
+
 """
     mimic(::Type{T}) where T
 
@@ -88,6 +92,37 @@ function mimic(::Type{T}; force=false, debug=false) where T
             else
                 debug && @warn "Failed to mimic $method"
             end
+        end
+    end
+end
+
+### Convenience methods
+
+struct RemoteIO <: IO
+    chan::RemoteChannel
+end
+RemoteIO(id::Int) =
+    RemoteIO(RemoteChannel(()->Channel(typemax(Int)), id))
+Base.write(rio::RemoteIO, x::UInt8) = (put!(rio.chan, x); 1)
+Base.take!(rio::RemoteIO) = take!(rio.chan)
+Base.isready(rio::RemoteIO) = isready(rio.chan)
+
+function Base.show(io::IO, r::RemoteObject)
+    if myid() == 1
+        rio = RemoteIO(r.id)
+        remotecall_wait(Base.show, r.id, rio, r)
+        # TODO: This is pretty inefficient, instead send whole strings
+        buf = UInt8[]
+        while isready(rio)
+            push!(buf, take!(rio))
+        end
+        print(io, String(buf))
+    else
+        print(io, "RemoteObject (worker $(myid())): ")
+        try
+            Base.show(io, _unwrap(r))
+        catch err
+            print(io, "Error during show")
         end
     end
 end
