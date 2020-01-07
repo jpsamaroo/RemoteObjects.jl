@@ -8,7 +8,7 @@ const DEFAULT_WORKER = Ref(2)
 const LOCALS = Dict{UUID,Any}()
 const CONNS_CTR = Ref{Int}(0)
 const CONNS = Dict{Int,TCPSocket}()
-const FINALIZER_QUEUE = Channel{Tuple{Int,UUID}}()
+const FINALIZER_QUEUE = Channel{Tuple{Int,UUID}}(Inf)
 
 mutable struct RemoteObject{T}
     rtype::Type{T}
@@ -139,11 +139,18 @@ end
 function __init__()
     @async begin
         while true
-            # FIXME: Support remote server object
             id, uuid = take!(FINALIZER_QUEUE)
-            id in workers() || continue
             try
-                remotecall_fetch(finalize_object, id, uuid)
+                if id > 0
+                    # Distributed worker
+                    id in workers() || continue
+                    remotecall_fetch(finalize_object, id, uuid)
+                else
+                    # RemoteServer
+                    conn = CONNS[-id]
+                    serialize(conn, (cmd=:finalize, data=uuid))
+                    result = deserialize(conn)
+                end
             catch err
                 #@warn "Failed to finalize RemoteObject on $id: $uuid"
                 showerror(stderr, err, catch_backtrace())
