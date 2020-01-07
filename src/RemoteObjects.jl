@@ -6,8 +6,6 @@ export RemoteObject, mimic, @remote
 
 const DEFAULT_WORKER = Ref(2)
 const LOCALS = Dict{UUID,Any}()
-const CONNS_CTR = Ref{Int}(0)
-const CONNS = Dict{Int,TCPSocket}()
 const FINALIZER_QUEUE = Channel{Tuple{Int,UUID}}(Inf)
 
 mutable struct RemoteObject{T}
@@ -58,8 +56,8 @@ function Base.fetch(robj::RemoteObject)
         return remotecall_fetch(RemoteObjects._unwrap, robj.id, robj.uuid)
     else
         conn = CONNS[-robj.id]
-        serialize(conn, (cmd=:get, data=robj.uuid))
-        blob = deserialize(conn)
+        serialize(conn.conn, (cmd=:get, data=robj.uuid))
+        blob = deserialize(conn.conn)
         return blob.result
     end
 end
@@ -85,8 +83,10 @@ function mimic(::Type{T}; force=false, debug=false) where T
             syms = Symbol.(split(method.slot_syms, '\0')[2:end-1])
             params = method.sig.parameters[2:end]
             args = [Expr(:(::), syms[idx], x===T ? RemoteObject : x) for (idx,x) in enumerate(params)]
+            # FIXME: Support kwargs
             cargs = [x===T ? :(RemoteObjects._unwrap($(syms[idx]))) : syms[idx] for (idx,x) in enumerate(params)]
             if myid() == 1
+                # FIXME: Support RemoteServer
                 ex = :($mod.$name($(args...)) = remotecall_fetch($(f.instance), $(DEFAULT_WORKER[]), $(syms...)))
             else
                 ex = :($mod.$name($(args...)) = RemoteObjects.remote($(f.instance), $(cargs...)))
@@ -117,22 +117,30 @@ Base.take!(rio::RemoteIO) = take!(rio.chan)
 Base.isready(rio::RemoteIO) = isready(rio.chan)
 
 function Base.show(io::IO, r::RemoteObject)
-    if myid() == 1
-        rio = RemoteIO(r.id)
-        remotecall_wait(Base.show, r.id, rio, r)
-        # TODO: This is pretty inefficient, instead send whole strings
-        buf = UInt8[]
-        while isready(rio)
-            push!(buf, take!(rio))
+    if r.id > 0
+        if myid() == 1
+            rio = RemoteIO(r.id)
+            remotecall_wait(Base.show, r.id, rio, r)
+            # TODO: This is pretty inefficient, instead send whole strings
+            buf = UInt8[]
+            while isready(rio)
+                push!(buf, take!(rio))
+            end
+            print(io, String(buf))
+        else
+            println(io, "RemoteObject (worker $(myid())):")
+            try
+                Base.show(io, _unwrap(r))
+            catch err
+                print(io, "Error during show")
+                # FIXME: Send error too
+            end
         end
-        print(io, String(buf))
     else
-        print(io, "RemoteObject (worker $(myid())): ")
-        try
-            Base.show(io, _unwrap(r))
-        catch err
-            print(io, "Error during show")
-        end
+        conn = CONNS[-r.id]
+        serialize(conn.conn, (cmd=:show, data=r.uuid))
+        println(io, "RemoteObject (conn $(conn.host):$(conn.port)):")
+        print(io, deserialize(conn.conn).result)
     end
 end
 
@@ -148,8 +156,8 @@ function __init__()
                 else
                     # RemoteServer
                     conn = CONNS[-id]
-                    serialize(conn, (cmd=:finalize, data=uuid))
-                    result = deserialize(conn)
+                    serialize(conn.conn, (cmd=:finalize, data=uuid))
+                    result = deserialize(conn.conn)
                 end
             catch err
                 #@warn "Failed to finalize RemoteObject on $id: $uuid"
