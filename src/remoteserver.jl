@@ -6,6 +6,9 @@ struct RemoteServer
     conn::TCPSocket
 end
 
+const CONNS_CTR = Ref{Int}(0)
+const CONNS = Dict{Int,RemoteServer}()
+
 function connect_remote(host, port)
     conn = connect(host, port)
     return RemoteServer(string(host), port, conn)
@@ -47,6 +50,12 @@ function handle_cmd(conn, ::Val{:get}, uuid)
     robj = _unwrap(uuid)
     serialize(conn, (result=robj,))
 end
+function handle_cmd(conn, ::Val{:show}, uuid)
+    iob = IOBuffer()
+    robj = _unwrap(uuid)
+    Base.show(iob, robj)
+    serialize(conn, (result=String(take!(iob)),))
+end
 
 macro remote(conn, ex)
     quote
@@ -56,7 +65,7 @@ macro remote(conn, ex)
             T = eval(Symbol(blob.result.rtype))
             uuid = blob.result.uuid
             id = CONNS_CTR[]+1
-            CONNS[id] = $(esc(conn)).conn
+            CONNS[id] = $(esc(conn))
             RemoteObject(T, uuid, -id)
         else
             err = blob.err

@@ -22,7 +22,7 @@ x = mycall(r)
 iob = IOBuffer()
 Base.show(iob, r)
 str = String(take!(iob))
-@test str == "RemoteObject (worker 2): MyStruct(1)"
+@test str == "RemoteObject (worker 2):\nMyStruct(1)"
 
 r = @remote MyStruct(2)
 @test r isa RemoteObject{MyStruct}
